@@ -4,7 +4,7 @@ from rest_framework.authtoken.models import Token
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
+from businesses.models import Membership
 from .serializers import LoginSerializer, RegisterSerializer
 
 
@@ -68,17 +68,38 @@ class LoginAPIView(APIView):
         )
 
 
+
 class CurrentUserAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         user = request.user
 
-        return Response(
-            {
-                "id": str(user.pk),
-                "username": user.username,
-                "email": user.email,
-                "phone_number": user.phone_number,
-            }
+        memberships = (
+            Membership.objects
+            .filter(
+                user=user,
+                is_active=True,
+                business__is_active=True,
+            )
+            .select_related("business")
+            .order_by("business__name")
         )
+
+        businesses = [
+            {
+                "membership_id": str(membership.id),
+                "business_id": str(membership.business.id),
+                "business_name": membership.business.name,
+                "role": membership.role,
+            }
+            for membership in memberships
+        ]
+
+        return Response({
+            "id": str(user.pk),
+            "username": user.username,
+            "email": user.email,
+            "phone_number": user.phone_number,
+            "businesses": businesses,
+        })
