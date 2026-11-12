@@ -7,7 +7,7 @@ from rest_framework.views import APIView
 
 from businesses.models import Membership
 from .models import Sale
-from .serializers import CreateSaleSerializer
+from .serializers import CreateSaleSerializer, SaleListSerializer
 from .services import process_sale
 
 
@@ -17,7 +17,8 @@ SALES_ROLES = {"owner", "admin", "manager", "cashier"}
 class SaleViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     queryset = Sale.objects.none()
-    serializer_class = CreateSaleSerializer
+    serializer_class = SaleListSerializer
+
     def get_queryset(self):
         memberships = Membership.objects.filter(
             user=self.request.user,
@@ -26,13 +27,19 @@ class SaleViewSet(viewsets.ReadOnlyModelViewSet):
             role__in=SALES_ROLES,
         ).values_list("business_id", flat=True)
 
-        return Sale.objects.filter(
+        queryset = Sale.objects.filter(
             business_id__in=memberships
         ).select_related(
             "business",
             "branch",
             "cashier",
         ).order_by("-created_at")
+
+        business_id = self.request.query_params.get("business_id")
+        if business_id:
+            queryset = queryset.filter(business_id=business_id)
+
+        return queryset
 
     @action(detail=False, methods=["post"], url_path="checkout")
     def checkout(self, request):

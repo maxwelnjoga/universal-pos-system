@@ -1,9 +1,23 @@
 from django.http import JsonResponse
-from django.utils import timezone
-from django.contrib.auth.decorators import login_required
-from django.shortcuts import render
 
-# Create your views here.
-@login_required
-def dashboard(request):
-    return render(request, "dashboard.html")
+
+def api_root(request):
+    """API index, served at / and /api/ (the React app is a separate project)."""
+    return JsonResponse(
+        {
+            "name": "Universal POS API",
+            "status": "ok",
+            "admin": "/admin/",
+            "endpoints": {
+                "auth": "/api/auth/",
+                "businesses": "/api/businesses/",
+                "sales": "/api/sales/",
+                "inventory": "/api/inventory/",
+                "inventory_management": "/api/inventory-management/",
+                "purchasing": "/api/purchasing/",
+                "purchasing_management": "/api/purchasing-management/",
+                "reports": "/api/reports/",
+                "payments": "/api/payments/",
+            },
+        }
+    )

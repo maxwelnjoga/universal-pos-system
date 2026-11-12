@@ -95,3 +95,23 @@ class CreateSaleSerializer(serializers.Serializer):
         attrs["products"] = products_by_id
 
         return attrs
+
+
+class SaleListSerializer(serializers.Serializer):
+    """Read-only representation used when listing sales."""
+
+    id = serializers.UUIDField()
+    receipt_number = serializers.CharField(allow_null=True)
+    status = serializers.CharField()
+    business = serializers.UUIDField(source="business_id")
+    branch = serializers.UUIDField(source="branch_id")
+    branch_name = serializers.CharField(source="branch.name")
+    cashier_name = serializers.SerializerMethodField()
+    subtotal = serializers.DecimalField(max_digits=12, decimal_places=2)
+    discount_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    tax_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    created_at = serializers.DateTimeField()
+
+    def get_cashier_name(self, obj):
+        return obj.cashier.get_username() if obj.cashier else None

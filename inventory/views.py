@@ -107,7 +107,20 @@ class ProductViewSet(BusinessScopedViewSet):
     def perform_create(self, serializer):
         business_id = serializer.validated_data["business"].pk
         self.require_inventory_manager(business_id)
-        serializer.save()
+        product = serializer.save()
+
+        # Give the new product a (zero) stock record in every active branch
+        # so stock can be adjusted or received straight away.
+        from businesses.models import Branch
+
+        for branch in Branch.objects.filter(
+            business_id=business_id, is_active=True
+        ):
+            Stock.objects.get_or_create(
+                branch=branch,
+                product=product,
+                defaults={"quantity": 0, "reorder_level": 0},
+            )
 
     def perform_update(self, serializer):
         business_id = serializer.instance.business_id

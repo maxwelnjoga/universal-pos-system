@@ -2,6 +2,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 
 from rest_framework import status
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -10,8 +11,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from businesses.models import Branch, Membership
-from inventory.models import Product
+from inventory.models import Product, Stock, StockMovement
 from purchasing.models import Supplier, Purchase, PurchaseItem
+from purchasing.serializers import SupplierSerializer, PurchaseSerializer
 
 class PurchasingAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -71,9 +73,11 @@ class SupplierListCreateView(PurchasingAPIView):
         membership = self.get_membership(request, business_id)
         self.require_purchasing_access(membership)
 
-        serializer = SupplierSerializer(data=request.data)
+        data = {key: value for key, value in request.data.items()}
+        data["business"] = business_id
+        serializer = SupplierSerializer(data=data)
         serializer.is_valid(raise_exception=True)
-        supplier = serializer.save(business_id=business_id)
+        supplier = serializer.save()
 
         return Response(
             SupplierSerializer(supplier).data,
@@ -97,7 +101,7 @@ class PurchaseListView(PurchasingAPIView):
         )
 
         if membership.role not in ["owner", "admin"]:
-            assigned_branch_ids = membership.branch_assignments.values_list(
+            assigned_branch_ids = membership.staff_assignment.values_list(
                 "branch_id",
                 flat=True,
             )
@@ -122,7 +126,7 @@ class PurchaseListView(PurchasingAPIView):
                     })
 
                 if membership.role not in ["owner", "admin"]:
-                    if not membership.branch_assignments.filter(
+                    if not membership.staff_assignment.filter(
                         branch=branch
                     ).exists():
                         raise PermissionDenied(
@@ -167,7 +171,7 @@ class PurchaseCreateView(PurchasingAPIView):
         self.require_purchasing_access(membership)
 
         if membership.role not in ["owner", "admin"]:
-            if not membership.branch_assignments.filter(
+            if not membership.staff_assignment.filter(
                 branch_id=branch_id
             ).exists():
                 raise PermissionDenied(
@@ -311,7 +315,7 @@ class ReceivePurchaseView(PurchasingAPIView):
             )
 
             if membership.role not in ["owner", "admin"]:
-                assigned = membership.branch_assignments.filter(
+                assigned = membership.staff_assignment.filter(
                     branch_id=purchase.branch_id
                 ).exists()
 

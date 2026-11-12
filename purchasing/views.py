@@ -49,7 +49,7 @@ def check_branch_access(membership, branch):
     if membership.role in ["owner", "admin"]:
         return
 
-    if not membership.branch_assignments.filter(
+    if not membership.staff_assignment.filter(
         branch=branch
     ).exists():
         raise PermissionDenied(

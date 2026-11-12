@@ -2,6 +2,41 @@
 "use strict";
 
 const REPORTS_URL = "/api/reports/dashboard/";
+const BUSINESSES_URL = "/api/businesses/";
+
+/*
+ * The reporting API requires ?business_id=... so we first look up the
+ * businesses the signed-in user belongs to and use the first one
+ * (or the one stored from a previous visit).
+ */
+async function resolveBusinessId() {
+    let saved = null;
+    try { saved = window.localStorage.getItem("pos_business_id"); } catch (e) { /* ignore */ }
+
+    const response = await fetch(BUSINESSES_URL, {
+        headers: { "Accept": "application/json" },
+        credentials: "same-origin"
+    });
+
+    if (!response.ok) {
+        throw new Error(`Could not load your businesses (HTTP ${response.status}).`);
+    }
+
+    const data = await response.json();
+    const businesses = Array.isArray(data.results) ? data.results : [];
+
+    if (!businesses.length) {
+        throw new Error(
+            "Your account is not a member of any business yet. Create a business and membership in the admin site."
+        );
+    }
+
+    const chosen = businesses.find((b) => b.id === saved) || businesses[0];
+
+    try { window.localStorage.setItem("pos_business_id", chosen.id); } catch (e) { /* ignore */ }
+
+    return chosen.id;
+}
 
 const moneyFormatter = new Intl.NumberFormat("en-KE", {
     style: "currency",
@@ -284,7 +319,9 @@ async function loadDashboard() {
     setMessage("Loading dashboard data...");
 
     try {
-        const response = await fetch(REPORTS_URL, {
+        const businessId = await resolveBusinessId();
+        const response = await fetch(
+            `${REPORTS_URL}?business_id=${encodeURIComponent(businessId)}`, {
             method: "GET",
             headers: {
                 "Accept": "application/json"

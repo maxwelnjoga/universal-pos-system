@@ -39,6 +39,13 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
 ]
 
+# Deployed frontend URL(s), comma separated, e.g.
+#   set FRONTEND_ORIGINS=https://pos.example.com
+import os as _os
+CORS_ALLOWED_ORIGINS += [
+    o.strip() for o in _os.environ.get("FRONTEND_ORIGINS", "").split(",") if o.strip()
+]
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -64,6 +71,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -78,7 +86,7 @@ ROOT_URLCONF = 'universal_pos.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / "templates"],
+        'DIRS': [],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -140,9 +148,9 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
-STATICFILES_DIRS = [
-    BASE_DIR / "static",
-]
+# Static files (Django admin only; the React app is a separate project).
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
@@ -163,3 +171,5 @@ REST_FRAMEWORK={
     ],
 }
 AUTH_USER_MODEL="accounts.User"
+
+
