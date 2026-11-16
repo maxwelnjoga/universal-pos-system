@@ -82,6 +82,37 @@ class Branch(models.Model):
         return f"{self.business.name} - {self.name}"
 
 
+
+class BusinessRole(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+    business = models.ForeignKey(
+        Business,
+        on_delete=models.CASCADE,
+        related_name="roles",
+    )
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    is_system_role = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["business", "name"],
+                name="unique_role_name_per_business",
+            )
+        ]
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"{self.name} - {self.business.name}"
+
 class Membership(models.Model):
     ROLE_CHOICES = [
         ("owner", "Owner"),
@@ -97,11 +128,8 @@ class Membership(models.Model):
         default=uuid.uuid4,
         editable=False,
     )
-    business = models.ForeignKey(
-        Business,
-        on_delete=models.CASCADE,
-        related_name="business_memberships",
-    )
+    custom_role = models.ForeignKey(BusinessRole,on_delete=models.SET_NULL,null=True,blank=True,related_name="memberships")
+    business = models.ForeignKey(Business,on_delete=models.CASCADE,related_name="business_memberships",)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -122,6 +150,44 @@ class Membership(models.Model):
     def __str__(self):
         return f"{self.user.username} - {self.business.name} ({self.role})"
 
+
+class Permission(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+    code = models.CharField(max_length=100, unique=True)
+    name = models.CharField(max_length=150)
+    description = models.TextField(blank=True)
+    category = models.CharField(max_length=100)
+
+    def __str__(self):
+        return self.name
+
+
+class RolePermission(models.Model):
+    role = models.ForeignKey(
+        BusinessRole,
+        on_delete=models.CASCADE,
+        related_name="role_permissions",
+    )
+    permission = models.ForeignKey(
+        Permission,
+        on_delete=models.CASCADE,
+        related_name="permission_roles",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["role", "permission"],
+                name="unique_permission_per_role",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.role.name} - {self.permission.code}"
 
 class BranchAssignment(models.Model):
     membership = models.ForeignKey(

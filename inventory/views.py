@@ -1,5 +1,11 @@
 from django.core.exceptions import ValidationError
-from django.shortcuts import get_object_or_404
+from django.db.models import Q
+
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied, ValidationError as APIValidationError
+from django.core.exceptions import ValidationError
+from django.db.models import Q
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -109,12 +115,12 @@ class ProductViewSet(BusinessScopedViewSet):
         self.require_inventory_manager(business_id)
         product = serializer.save()
 
-        # Give the new product a (zero) stock record in every active branch
-        # so stock can be adjusted or received straight away.
+        # Create a zero-stock record in every active branch.
         from businesses.models import Branch
 
         for branch in Branch.objects.filter(
-            business_id=business_id, is_active=True
+            business_id=business_id,
+            is_active=True,
         ):
             Stock.objects.get_or_create(
                 branch=branch,
@@ -148,11 +154,25 @@ class StockViewSet(viewsets.ReadOnlyModelViewSet):
             user=self.request.user,
             is_active=True,
             business__is_active=True,
+            role__in=INVENTORY_MANAGER_ROLES,
+        )
+
+        admin_business_ids = memberships.filter(
+            role__in=["owner", "admin"],
+        ).values_list("business_id", flat=True)
+
+        assigned_branch_ids = memberships.filter(
+            role__in=["manager", "stock_manager"],
+        ).values_list(
+            "staff_assignment__branch_id",
+            flat=True,
         )
 
         queryset = Stock.objects.filter(
-            branch__business__in=memberships.values("business_id"),
+            Q(branch__business_id__in=admin_business_ids)
+            | Q(branch_id__in=assigned_branch_ids),
             branch__is_active=True,
+            product__is_active=True,
         ).select_related(
             "branch",
             "branch__business",
@@ -181,6 +201,12 @@ class StockViewSet(viewsets.ReadOnlyModelViewSet):
             is_active=True,
             business__is_active=True,
             role__in=INVENTORY_MANAGER_ROLES,
+        ).filter(
+            Q(role__in=["owner", "admin"])
+            | Q(
+                role__in=["manager", "stock_manager"],
+                staff_assignment__branch_id=stock.branch_id,
+            )
         ).exists()
 
         if not can_manage:
@@ -232,14 +258,29 @@ class StockMovementViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        business_ids = Membership.objects.filter(
+        memberships = Membership.objects.filter(
             user=self.request.user,
             is_active=True,
             business__is_active=True,
+            role__in=INVENTORY_MANAGER_ROLES,
+        )
+
+        admin_business_ids = memberships.filter(
+            role__in=["owner", "admin"],
         ).values_list("business_id", flat=True)
 
+        assigned_branch_ids = memberships.filter(
+            role__in=["manager", "stock_manager"],
+        ).values_list(
+            "staff_assignment__branch_id",
+            flat=True,
+        )
+
         queryset = StockMovement.objects.filter(
-            stock__branch__business_id__in=business_ids,
+            Q(stock__branch__business_id__in=admin_business_ids)
+            | Q(stock__branch_id__in=assigned_branch_ids),
+            stock__branch__is_active=True,
+            stock__product__is_active=True,
         ).select_related(
             "stock",
             "stock__product",

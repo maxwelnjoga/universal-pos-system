@@ -26,11 +26,19 @@ class BaseExtraReportView(APIView):
             user=request.user,
             business_id=business_id,
             is_active=True,
+            business__is_active=True,
         ).first()
 
         if not membership:
             raise PermissionDenied(
                 "You do not have access to this business."
+            )
+
+        REPORT_ROLES = {"owner", "admin", "manager", "accountant"}
+
+        if membership.role not in REPORT_ROLES:
+            raise PermissionDenied(
+                "You do not have permission to access reports."
             )
 
         branches = Branch.objects.filter(
@@ -113,6 +121,25 @@ class InventoryReportView(BaseExtraReportView):
 class PurchasingReportView(BaseExtraReportView):
     def get(self, request):
         business_id, branches = self.get_report_context(request)
+
+        membership = Membership.objects.filter(
+            user=request.user,
+            business_id=business_id,
+            is_active=True,
+            business__is_active=True,
+        ).first()
+
+        purchasing_roles = {
+            "owner", "admin", "manager", "stock_manager"
+        }
+
+        if (
+            membership is None
+            or membership.role not in purchasing_roles
+        ):
+            raise PermissionDenied(
+                "You do not have permission to access purchasing reports."
+            )
 
         purchases = Purchase.objects.filter(
             business_id=business_id,

@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from rest_framework import status, viewsets
@@ -25,11 +25,20 @@ from .serializers import (
 )
 
 
+PURCHASING_ROLES = {
+    "owner",
+    "admin",
+    "manager",
+    "stock_manager",
+}
+
+
 def get_membership(user, business_id):
     membership = Membership.objects.filter(
         user=user,
         business_id=business_id,
         is_active=True,
+        business__is_active=True,
     ).first()
 
     if membership is None:
@@ -65,10 +74,13 @@ class SupplierViewSet(viewsets.ModelViewSet):
         business_ids = Membership.objects.filter(
             user=self.request.user,
             is_active=True,
+            business__is_active=True,
+            role__in=PURCHASING_ROLES,
         ).values_list("business_id", flat=True)
 
         return Supplier.objects.filter(
-            business_id__in=business_ids
+            business_id__in=business_ids,
+            business__is_active=True,
         ).select_related("business")
 
     def perform_create(self, serializer):
@@ -79,9 +91,7 @@ class SupplierViewSet(viewsets.ModelViewSet):
             business.id,
         )
 
-        if membership.role not in [
-            "owner", "admin", "manager"
-        ]:
+        if membership.role not in PURCHASING_ROLES:
             raise PermissionDenied(
                 "You cannot create suppliers."
             )
@@ -96,11 +106,24 @@ class SupplierViewSet(viewsets.ModelViewSet):
             supplier.business_id,
         )
 
-        if membership.role not in [
-            "owner", "admin", "manager"
-        ]:
+        if membership.role not in PURCHASING_ROLES:
             raise PermissionDenied(
                 "You cannot update suppliers."
+            )
+
+        new_business = serializer.validated_data.get(
+            "business",
+            supplier.business,
+        )
+
+        new_membership = get_membership(
+            self.request.user,
+            new_business.id,
+        )
+
+        if new_membership.role not in PURCHASING_ROLES:
+            raise PermissionDenied(
+                "You cannot move suppliers to this business."
             )
 
         serializer.save()
@@ -111,9 +134,7 @@ class SupplierViewSet(viewsets.ModelViewSet):
             instance.business_id,
         )
 
-        if membership.role not in [
-            "owner", "admin", "manager"
-        ]:
+        if membership.role not in PURCHASING_ROLES:
             raise PermissionDenied(
                 "You cannot delete suppliers."
             )
@@ -132,13 +153,29 @@ class PurchaseViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        business_ids = Membership.objects.filter(
+        memberships = Membership.objects.filter(
             user=self.request.user,
             is_active=True,
+            business__is_active=True,
+            role__in=PURCHASING_ROLES,
+        )
+
+        admin_business_ids = memberships.filter(
+            role__in=["owner", "admin"],
         ).values_list("business_id", flat=True)
 
+        assigned_branch_ids = memberships.filter(
+            role__in=["manager", "stock_manager"],
+        ).values_list(
+            "staff_assignment__branch_id",
+            flat=True,
+        )
+
         return Purchase.objects.filter(
-            business_id__in=business_ids
+            Q(business_id__in=admin_business_ids)
+            | Q(branch_id__in=assigned_branch_ids),
+            business__is_active=True,
+            branch__is_active=True,
         ).select_related(
             "business",
             "branch",
@@ -161,9 +198,7 @@ class CreatePurchaseView(APIView):
             data["business_id"],
         )
 
-        if membership.role not in [
-            "owner", "admin", "manager", "stock_manager"
-        ]:
+        if membership.role not in PURCHASING_ROLES:
             raise PermissionDenied(
                 "You cannot create purchases."
             )
@@ -280,9 +315,7 @@ class ReceivePurchaseView(APIView):
                 purchase.business_id,
             )
 
-            if membership.role not in [
-                "owner", "admin", "manager", "stock_manager"
-            ]:
+            if membership.role not in PURCHASING_ROLES:
                 raise PermissionDenied(
                     "You cannot receive purchases."
                 )

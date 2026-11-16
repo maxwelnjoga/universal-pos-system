@@ -1,5 +1,5 @@
 from decimal import Decimal, InvalidOperation
-
+from businesses.permissions import require_business_permission
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -14,6 +14,7 @@ from businesses.models import Branch, Membership
 from inventory.models import Product, Stock, StockMovement
 from purchasing.models import Supplier, Purchase, PurchaseItem
 from purchasing.serializers import SupplierSerializer, PurchaseSerializer
+
 
 class PurchasingAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -52,7 +53,8 @@ class SupplierListCreateView(PurchasingAPIView):
                 "business_id": "This query parameter is required."
             })
 
-        self.get_membership(request, business_id)
+        membership = self.get_membership(request, business_id)
+        require_business_permission(membership, "purchasing.view")
 
         suppliers = Supplier.objects.filter(
             business_id=business_id
@@ -71,7 +73,7 @@ class SupplierListCreateView(PurchasingAPIView):
             })
 
         membership = self.get_membership(request, business_id)
-        self.require_purchasing_access(membership)
+        require_business_permission(membership, "purchasing.create")
 
         data = {key: value for key, value in request.data.items()}
         data["business"] = business_id
@@ -95,10 +97,9 @@ class PurchaseListView(PurchasingAPIView):
             })
 
         membership = self.get_membership(request, business_id)
+        require_business_permission(membership, "purchasing.view")
 
-        purchases = Purchase.objects.filter(
-            business_id=business_id
-        )
+        purchases = Purchase.objects.filter(business_id=business_id)
 
         if membership.role not in ["owner", "admin"]:
             assigned_branch_ids = membership.staff_assignment.values_list(
@@ -110,6 +111,7 @@ class PurchaseListView(PurchasingAPIView):
             )
 
         branch_id = request.query_params.get("branch_id")
+
         if branch_id:
             if not purchases.filter(branch_id=branch_id).exists():
                 # An empty result is valid, but an inaccessible branch
@@ -136,6 +138,7 @@ class PurchaseListView(PurchasingAPIView):
             purchases = purchases.filter(branch_id=branch_id)
 
         purchase_status = request.query_params.get("status")
+
         if purchase_status:
             purchases = purchases.filter(status=purchase_status)
 
@@ -168,7 +171,7 @@ class PurchaseCreateView(PurchasingAPIView):
             })
 
         membership = self.get_membership(request, business_id)
-        self.require_purchasing_access(membership)
+        require_business_permission(membership, "purchasing.create")
 
         if membership.role not in ["owner", "admin"]:
             if not membership.staff_assignment.filter(
@@ -295,6 +298,7 @@ class PurchaseCreateView(PurchasingAPIView):
             status=status.HTTP_201_CREATED,
         )
 
+
 class ReceivePurchaseView(PurchasingAPIView):
     def post(self, request, purchase_id):
         business_id = request.data.get("business_id")
@@ -305,7 +309,7 @@ class ReceivePurchaseView(PurchasingAPIView):
             })
 
         membership = self.get_membership(request, business_id)
-        self.require_purchasing_access(membership)
+        require_business_permission(membership, "purchasing.receive")
 
         with transaction.atomic():
             purchase = get_object_or_404(

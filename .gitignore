@@ -48,3 +48,12 @@ db.sqlite3-journal
 
 node_modules/
 staticfiles/
+
+# Python generated files
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Temporary review and test files
+permissions-review.zip
+test_auth.py

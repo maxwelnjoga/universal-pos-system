@@ -46,6 +46,13 @@ def get_report_context(request):
             "You do not have access to this business."
         )
 
+    REPORT_ROLES = {"owner", "admin", "manager", "accountant"}
+
+    if membership.role not in REPORT_ROLES:
+        raise PermissionDenied(
+            "You do not have permission to access reports."
+        )
+
     branch = None
 
     if membership.role in ["owner", "admin"]:
@@ -179,10 +186,24 @@ class DashboardReportView(APIView):
             is_active=True,
         ).count()
 
-        pending_purchases = Purchase.objects.filter(
-            business=business,
-            status="draft",
-        ).count()
+        pending_purchases = 0
+
+        purchasing_roles = {
+            "owner", "admin", "manager", "stock_manager"
+        }
+
+        if membership.role in purchasing_roles:
+            purchase_queryset = Purchase.objects.filter(
+                business=business,
+                status="draft",
+            )
+
+            if branch is not None:
+                purchase_queryset = purchase_queryset.filter(
+                    branch=branch
+                )
+
+            pending_purchases = purchase_queryset.count()
 
         recent_sales = sales.select_related(
             "branch", "cashier", "customer"
@@ -377,6 +398,15 @@ class PurchasingReportView(APIView):
 
     def get(self, request):
         business, branch, membership = get_report_context(request)
+
+        purchasing_roles = {
+            "owner", "admin", "manager", "stock_manager"
+        }
+
+        if membership.role not in purchasing_roles:
+            raise PermissionDenied(
+                "You do not have permission to access purchasing reports."
+            )
 
         purchases = Purchase.objects.filter(
             business=business

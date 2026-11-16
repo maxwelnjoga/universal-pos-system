@@ -14,6 +14,38 @@ from inventory.models import Product, Stock
 from purchasing.models import Purchase
 
 
+DASHBOARD_ROLES = {
+    "owner",
+    "admin",
+    "manager",
+    "cashier",
+    "stock_manager",
+    "accountant",
+}
+
+SALES_DASHBOARD_ROLES = {
+    "owner",
+    "admin",
+    "manager",
+    "cashier",
+    "accountant",
+}
+
+INVENTORY_DASHBOARD_ROLES = {
+    "owner",
+    "admin",
+    "manager",
+    "stock_manager",
+}
+
+PURCHASING_DASHBOARD_ROLES = {
+    "owner",
+    "admin",
+    "manager",
+    "stock_manager",
+}
+
+
 class POSDashboardView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -30,11 +62,13 @@ class POSDashboardView(APIView):
             user=request.user,
             business_id=business_id,
             is_active=True,
+            business__is_active=True,
+            role__in=DASHBOARD_ROLES,
         ).first()
 
         if membership is None:
             raise PermissionDenied(
-                "You do not have access to this business."
+                "You do not have access to this business dashboard."
             )
 
         branches = Branch.objects.filter(
@@ -43,11 +77,14 @@ class POSDashboardView(APIView):
         )
 
         if membership.role not in ["owner", "admin"]:
-            branches = branches.filter(
-                id__in=membership.staff_assignment.values_list(
+            assigned_branch_ids = (
+                membership.staff_assignment.values_list(
                     "branch_id",
                     flat=True,
                 )
+            )
+            branches = branches.filter(
+                id__in=assigned_branch_ids
             )
 
         if branch_id:
@@ -60,29 +97,21 @@ class POSDashboardView(APIView):
 
             branches = branches.filter(id=branch_id)
 
-        sales = Sale.objects.filter(
-            business_id=business_id,
-            branch__in=branches,
-            status="completed",
-        )
+        # SALES DATA
+        sales = Sale.objects.none()
 
-        stock = Stock.objects.filter(
-            branch__in=branches,
-            product__business_id=business_id,
-        )
+        if membership.role in SALES_DASHBOARD_ROLES:
+            sales = Sale.objects.filter(
+                business_id=business_id,
+                branch__in=branches,
+                status="completed",
+            )
 
-        products = Product.objects.filter(
-            business_id=business_id,
-            is_active=True,
-        )
-
-        purchases = Purchase.objects.filter(
-            business_id=business_id,
-            branch__in=branches,
-        )
+            # Cashiers can only see their own sales.
+            if membership.role == "cashier":
+                sales = sales.filter(cashier=request.user)
 
         today = timezone.localdate()
-
         today_sales = sales.filter(created_at__date=today)
 
         sales_summary = sales.aggregate(
@@ -96,13 +125,10 @@ class POSDashboardView(APIView):
             count=Count("id"),
         )
 
-        low_stock = stock.filter(
-            quantity__lte=F("reorder_level"),
-            product__is_active=True,
-        ).select_related("product", "branch")
-
         recent_sales = sales.select_related(
-            "branch", "cashier", "customer"
+            "branch",
+            "cashier",
+            "customer",
         ).order_by("-created_at")[:10]
 
         recent_sales_data = [
@@ -120,18 +146,6 @@ class POSDashboardView(APIView):
             for sale in recent_sales
         ]
 
-        low_stock_data = [
-            {
-                "product_id": str(item.product_id),
-                "product_name": item.product.name,
-                "sku": item.product.sku,
-                "branch": item.branch.name,
-                "quantity": str(item.quantity),
-                "reorder_level": str(item.reorder_level),
-            }
-            for item in low_stock.order_by("quantity")[:10]
-        ]
-
         top_items = (
             SaleItem.objects.filter(sale__in=sales)
             .values("product_id", "product_name")
@@ -147,10 +161,68 @@ class POSDashboardView(APIView):
                 "product_id": str(item["product_id"]),
                 "product_name": item["product_name"],
                 "quantity_sold": str(item["quantity_sold"] or 0),
-                "sales_value": str(item["sales_value"] or Decimal("0.00")),
+                "sales_value": str(
+                    item["sales_value"] or Decimal("0.00")
+                ),
             }
             for item in top_items
         ]
+
+        # INVENTORY DATA
+        inventory_data = {
+            "active_products": 0,
+            "low_stock_count": 0,
+            "low_stock_items": [],
+        }
+
+        if membership.role in INVENTORY_DASHBOARD_ROLES:
+            stock = Stock.objects.filter(
+                branch__in=branches,
+                product__business_id=business_id,
+            )
+
+            products = Product.objects.filter(
+                business_id=business_id,
+                is_active=True,
+            )
+
+            low_stock = stock.filter(
+                quantity__lte=F("reorder_level"),
+                product__is_active=True,
+            ).select_related("product", "branch")
+
+            low_stock_data = [
+                {
+                    "product_id": str(item.product_id),
+                    "product_name": item.product.name,
+                    "sku": item.product.sku,
+                    "branch": item.branch.name,
+                    "quantity": str(item.quantity),
+                    "reorder_level": str(item.reorder_level),
+                }
+                for item in low_stock.order_by("quantity")[:10]
+            ]
+
+            inventory_data = {
+                "active_products": products.count(),
+                "low_stock_count": low_stock.count(),
+                "low_stock_items": low_stock_data,
+            }
+
+        # PURCHASING DATA
+        purchasing_data = {
+            "draft_purchases": 0,
+        }
+
+        if membership.role in PURCHASING_DASHBOARD_ROLES:
+            purchases = Purchase.objects.filter(
+                business_id=business_id,
+                branch__in=branches,
+            )
+
+            purchasing_data["draft_purchases"] = purchases.filter(
+                status="draft"
+            ).count()
 
         return Response({
             "business_id": str(business_id),
@@ -158,7 +230,9 @@ class POSDashboardView(APIView):
             "generated_at": timezone.now().isoformat(),
 
             "sales": {
-                "total": str(sales_summary["total"] or Decimal("0.00")),
+                "total": str(
+                    sales_summary["total"] or Decimal("0.00")
+                ),
                 "count": sales_summary["count"],
                 "average": str(
                     sales_summary["average"] or Decimal("0.00")
@@ -172,18 +246,8 @@ class POSDashboardView(APIView):
                 "sales_count": today_summary["count"],
             },
 
-            "inventory": {
-                "active_products": products.count(),
-                "low_stock_count": low_stock.count(),
-                "low_stock_items": low_stock_data,
-            },
-
-            "purchasing": {
-                "draft_purchases": purchases.filter(
-                    status="draft"
-                ).count(),
-            },
-
+            "inventory": inventory_data,
+            "purchasing": purchasing_data,
             "recent_sales": recent_sales_data,
             "top_products": top_products_data,
         })
