@@ -16,7 +16,7 @@ from purchasing.models import Purchase
 
 
 def get_report_context(request):
-    """Validate business membership and branch access."""
+    """Validate business membership and role-specific branch access."""
     business_id = request.query_params.get("business_id")
     branch_id = request.query_params.get("branch_id")
 
@@ -55,7 +55,9 @@ def get_report_context(request):
 
     branch = None
 
-    if membership.role in ["owner", "admin"]:
+    # Owners, admins and accountants can view all business
+    # branches or select one specific branch.
+    if membership.role in {"owner", "admin", "accountant"}:
         if branch_id:
             branch = Branch.objects.filter(
                 id=branch_id,
@@ -67,7 +69,9 @@ def get_report_context(request):
                 raise ValidationError({
                     "branch_id": "Invalid branch for this business."
                 })
-    else:
+
+    # Managers are restricted to their assigned branches.
+    elif membership.role == "manager":
         assigned_branches = Branch.objects.filter(
             business=business,
             is_active=True,
@@ -79,9 +83,13 @@ def get_report_context(request):
                 raise PermissionDenied(
                     "Select a branch assigned to your account."
                 )
+
             branch = assigned_branches.first()
         else:
-            branch = assigned_branches.filter(id=branch_id).first()
+            branch = assigned_branches.filter(
+                id=branch_id
+            ).first()
+
             if branch is None:
                 raise PermissionDenied(
                     "You are not assigned to this branch."
@@ -250,8 +258,36 @@ class DashboardReportView(APIView):
             for item in top_products
         ]
 
+        manager_overview = {
+            "active_staff_count": 0,
+            "pending_approvals_count": 0,
+        }
+
+        if membership.role == "manager" and branch is not None:
+            manager_overview["active_staff_count"] = (
+                Membership.objects.filter(
+                    business=business,
+                    is_active=True,
+                    user__is_active=True,
+                    staff_assignment__branch=branch,
+                )
+                .exclude(role__in=["owner", "admin"])
+                .values("user_id")
+                .distinct()
+                .count()
+            )
+
+            manager_overview["pending_approvals_count"] = (
+                Sale.objects.filter(
+                    business=business,
+                    branch=branch,
+                    status="draft",
+                ).count()
+            )
+
         return Response({
             "business_id": str(business.id),
+            "manager_overview": manager_overview,
             "business_name": business.name,
             "branch_id": str(branch.id) if branch else None,
             "branch_name": branch.name if branch else "All branches",
